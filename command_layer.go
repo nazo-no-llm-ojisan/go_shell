@@ -27,6 +27,12 @@ var commandTable = map[string]map[string]string{
 		"macos": "rm",
 		"wsl":   "rm",
 	},
+	"rmdir": {
+		"win":   "Remove-Item",
+		"linux": "rmdir",
+		"macos": "rmdir",
+		"wsl":   "rmdir",
+	},
 	"cat": {
 		"win":   "Get-Content",
 		"linux": "cat",

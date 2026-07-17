@@ -87,10 +87,10 @@ func TestResolveCommand_Passthrough(t *testing.T) {
 	cases := []struct {
 		logical, osName string
 	}{
-		{"git", "win"},     // not in table
-		{"dotnet", "win"},  // not in table
-		{"npm", "linux"},   // not in table
-		{"rg", "macos"},    // not in table
+		{"git", "win"},    // not in table
+		{"dotnet", "win"}, // not in table
+		{"npm", "linux"},  // not in table
+		{"rg", "macos"},   // not in table
 		{"unknownxyz", "win"},
 	}
 	for _, c := range cases {
@@ -127,8 +127,8 @@ func TestTranslateLS_Win(t *testing.T) {
 		want []string
 	}{
 		{[]string{"-a"}, []string{"-Force"}},
-		{[]string{"-l"}, []string{}},                 // long has no effect on win (default)
-		{[]string{"-al"}, []string{"-Force"}},         // long+all → -Force only
+		{[]string{"-l"}, []string{}},          // long has no effect on win (default)
+		{[]string{"-al"}, []string{"-Force"}}, // long+all → -Force only
 		{[]string{"-la"}, []string{"-Force"}},
 		{[]string{}, []string{}},
 		{[]string{"somepath"}, []string{"somepath"}},
@@ -237,10 +237,10 @@ func TestPwshQuote(t *testing.T) {
 	}{
 		{"hello", "'hello'"},
 		{"", "''"},
-		{"it's", "'it''s'"},          // single quote doubled
+		{"it's", "'it''s'"}, // single quote doubled
 		{"a'b'c", "'a''b''c'"},
 		{"path with space", "'path with space'"},
-		{"$HOME", "'$HOME'"},         // no variable expansion inside single quotes
+		{"$HOME", "'$HOME'"}, // no variable expansion inside single quotes
 	}
 	for _, c := range cases {
 		if got := pwshQuote(c.in); got != c.want {

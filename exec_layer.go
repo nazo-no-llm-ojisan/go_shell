@@ -50,6 +50,12 @@ func runOSMode(osName string, args []string, meta *metaConfig) {
 		os.Exit(2)
 	}
 
+	// Validate --cwd before any side effect
+	if err := validateCwd(meta); err != nil {
+		fmt.Fprintln(os.Stderr, "go_shell:", err)
+		os.Exit(2)
+	}
+
 	concrete := resolveAutoOSIfAuto(osName)
 	logicalCmd := stripDash(args[0])
 	rawArgs := args[1:]
@@ -77,7 +83,7 @@ func runOSMode(osName string, args []string, meta *metaConfig) {
 	resolvedStr := joinCommand(concreteCmd, translatedArgs)
 
 	res := newResult(concrete, backend, resolvedStr)
-	res = execute(res, backend, concreteCmd, translatedArgs, meta)
+	res = execute(res, backend, concreteCmd, translatedArgs, meta, mapped)
 
 	// Warn if fell back to Windows PowerShell 5.1
 	if backend == "pwsh" && strings.HasSuffix(res.Backend, "5.1") {
@@ -198,18 +204,30 @@ func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
 	finalize(res, meta)
 }
 
-func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaConfig) *result {
+func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaConfig, mapped bool) *result {
 	ctx, cancel := context.WithTimeout(context.Background(), meta.timeout)
 	defer cancel()
 
 	var c *exec.Cmd
 	switch backend {
 	case "pwsh":
-		// Build a single -Command string. cmd is a translator-generated
-		// syntax fragment (e.g. "Get-ChildItem", "New-Item -ItemType Directory").
+		// Build a single -Command string.
+		//
+		// mapped=true: cmd is a translator-generated PowerShell syntax fragment
+		//   (e.g. "Get-ChildItem", "New-Item -ItemType Directory"). Emitted raw.
+		// mapped=false (passthrough): cmd is a user-supplied command name
+		//   (e.g. "git", "dotnet"). Must be quoted and invoked with the
+		//   PowerShell call operator & to prevent syntax injection:
+		//     & 'git' 'status'
+		//
 		// Each arg is either Raw (translator flag like -Force) or a user value
 		// (always pwshQuote'd to prevent injection).
-		line := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::InputEncoding=[System.Text.Encoding]::UTF8; " + cmd
+		line := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::InputEncoding=[System.Text.Encoding]::UTF8; "
+		if mapped {
+			line += cmd
+		} else {
+			line += "& " + pwshQuote(cmd)
+		}
 		for _, a := range args {
 			if a.Raw {
 				line += " " + a.Value
@@ -312,23 +330,30 @@ func finalize(res *result, meta *metaConfig) {
 // On Windows, env var names are case-insensitive (PATH == Path).
 // On Linux/macOS, names are case-sensitive (PATH != Path).
 func mergeEnv(extra []string) []string {
+	return mergeEnvForOS(os.Environ(), extra, runtime.GOOS)
+}
+
+// mergeEnvForOS is the pure, host-independent core of mergeEnv.
+// goos selects the key comparison strategy: "windows" → case-insensitive,
+// anything else → case-sensitive. This allows deterministic testing of
+// the Windows case-insensitive override on Linux CI.
+func mergeEnvForOS(base, extra []string, goos string) []string {
 	if len(extra) == 0 {
-		return os.Environ()
+		// Return a copy to avoid aliasing the base slice.
+		out := make([]string, len(base))
+		copy(out, base)
+		return out
 	}
 	envMap := make(map[string]string)
-	keyOrder := make(map[string]string)
-	normalize := envKeyNormalizer()
+	normalize := envKeyNormalizerForOS(goos)
 
-	for _, kv := range os.Environ() {
+	for _, kv := range base {
 		key := kv
 		if idx := strings.Index(kv, "="); idx >= 0 {
 			key = kv[:idx]
 		}
 		nk := normalize(key)
 		envMap[nk] = kv
-		if _, exists := keyOrder[nk]; !exists {
-			keyOrder[nk] = key
-		}
 	}
 	for _, kv := range extra {
 		key := kv
@@ -338,9 +363,6 @@ func mergeEnv(extra []string) []string {
 			val = kv[idx+1:]
 		}
 		nk := normalize(key)
-		if _, exists := keyOrder[nk]; !exists {
-			keyOrder[nk] = key
-		}
 		envMap[nk] = key + "=" + val
 	}
 	out := make([]string, 0, len(envMap))
@@ -351,10 +373,52 @@ func mergeEnv(extra []string) []string {
 }
 
 func envKeyNormalizer() func(string) string {
-	if runtime.GOOS == "windows" {
+	return envKeyNormalizerForOS(runtime.GOOS)
+}
+
+func envKeyNormalizerForOS(goos string) func(string) string {
+	if goos == "windows" {
 		return strings.ToUpper
 	}
 	return func(s string) string { return s }
+}
+
+// ============================================================================
+// Path resolution for --cwd
+//
+// resolveCwd resolves a (possibly relative) path against meta.cwd.
+// If meta.cwd is empty or p is absolute, p is returned unchanged.
+// This is shared between OS mode (c.Dir) and function mode (write_file etc.)
+// so that --cwd semantics are identical across both modes.
+//
+// If meta.cwd is set but does not exist or is not a directory, returns an
+// error — callers must check BEFORE performing any side effect.
+// ============================================================================
+
+func resolveCwd(p string, meta *metaConfig) (string, error) {
+	if meta.cwd == "" {
+		return p, nil
+	}
+	if filepath.IsAbs(p) {
+		return p, nil
+	}
+	return filepath.Join(meta.cwd, p), nil
+}
+
+// validateCwd checks that meta.cwd, if set, exists and is a directory.
+// Returns an error if --cwd points to a missing path or a non-directory.
+func validateCwd(meta *metaConfig) error {
+	if meta.cwd == "" {
+		return nil
+	}
+	info, err := os.Stat(meta.cwd)
+	if err != nil {
+		return fmt.Errorf("--cwd: %s: %w", meta.cwd, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("--cwd: %s is not a directory", meta.cwd)
+	}
+	return nil
 }
 
 // ============================================================================
@@ -370,6 +434,19 @@ func logPath() string {
 }
 
 func writeLog(res *result) {
+	logErr := writeLogImpl(res)
+	// Log write failure is not fatal to the command itself, but in normal
+	// (non-JSON) mode we surface a warning on stderr so it's not silently
+	// swallowed. The command's own OK/exit_code is never changed by log errors.
+	// (A future --require-audit-log could promote this to fatal.)
+	if logErr != nil {
+		fmt.Fprintf(os.Stderr, "go_shell: warning: audit log write failed: %v\n", logErr)
+	}
+}
+
+// writeLogImpl performs the actual log append. Returns an error on failure
+// so the caller can decide whether to surface it.
+func writeLogImpl(res *result) error {
 	entry := map[string]any{
 		"ts":               time.Now().Format(time.RFC3339),
 		"ok":               res.OK,
@@ -382,12 +459,21 @@ func writeLog(res *result) {
 		"stderr_len":       len(res.Stderr),
 	}
 	line, _ := json.Marshal(entry)
-	_ = os.MkdirAll(filepath.Dir(logPath()), 0755)
-	f, err := os.OpenFile(logPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err := os.MkdirAll(filepath.Dir(logPath()), 0755); err != nil {
+		return err
+	}
+	// 0600: log contains resolved command strings (may include paths/args).
+	// Restrict to owner read/write to limit exposure.
+	f, err := os.OpenFile(logPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
-	f.Write(line)
-	f.Write([]byte("\n"))
+	if _, err := f.Write(line); err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte("\n")); err != nil {
+		return err
+	}
+	return nil
 }

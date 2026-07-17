@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 )
@@ -48,6 +49,11 @@ func runFunctionMode(name string, args []string, meta *metaConfig) {
 		fmt.Fprintf(os.Stderr, "go_shell: unknown function: -%s\n", name)
 		os.Exit(2)
 	}
+	// Validate --cwd before any side effect (same as OS mode)
+	if err := validateCwd(meta); err != nil {
+		fmt.Fprintln(os.Stderr, "go_shell:", err)
+		os.Exit(2)
+	}
 	res := fn(args, meta)
 	if res == nil {
 		res = &result{OK: true, ExitCode: 0}
@@ -89,6 +95,7 @@ func fnReadHermesSession(args []string, meta *metaConfig) *result {
 // fnWriteFile: write_file <path> <content>
 // content is read from stdin if "-" is given, else taken as literal.
 // Args are DATA — no stripDash.
+// Relative paths are resolved against --cwd (same as OS mode).
 func fnWriteFile(args []string, meta *metaConfig) *result {
 	if len(args) < 2 {
 		return &result{
@@ -97,21 +104,23 @@ func fnWriteFile(args []string, meta *metaConfig) *result {
 			Stderr:   "write_file: requires <path> <content>",
 		}
 	}
-	path := args[0]
+	path, err := resolveCwd(args[0], meta)
+	if err != nil {
+		return &result{OK: false, ExitCode: 2, Stderr: err.Error()}
+	}
 	content := args[1]
 	if content == "-" {
-		buf := make([]byte, 0, 4096)
-		tmp := make([]byte, 4096)
-		for {
-			n, err := os.Stdin.Read(tmp)
-			if n > 0 {
-				buf = append(buf, tmp[:n]...)
-			}
-			if err != nil {
-				break
+		// Read stdin fully via io.ReadAll. Any read error (not just EOF)
+		// must prevent the write — never persist partial content.
+		data, readErr := io.ReadAll(os.Stdin)
+		if readErr != nil {
+			return &result{
+				OK:       false,
+				ExitCode: 1,
+				Stderr:   fmt.Sprintf("write_file: stdin read error: %v", readErr),
 			}
 		}
-		content = string(buf)
+		content = string(data)
 	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return &result{OK: false, ExitCode: 1, Stderr: err.Error()}
@@ -133,8 +142,14 @@ func fnCopyFile(args []string, meta *metaConfig) *result {
 			Stderr:   "copy_file: requires <src> <dst>",
 		}
 	}
-	src := args[0]
-	dst := args[1]
+	src, err := resolveCwd(args[0], meta)
+	if err != nil {
+		return &result{OK: false, ExitCode: 2, Stderr: err.Error()}
+	}
+	dst, err := resolveCwd(args[1], meta)
+	if err != nil {
+		return &result{OK: false, ExitCode: 2, Stderr: err.Error()}
+	}
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return &result{OK: false, ExitCode: 1, Stderr: err.Error()}

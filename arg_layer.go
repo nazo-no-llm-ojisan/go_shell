@@ -36,6 +36,8 @@ func translateArgs(logicalCmd, osName string, rawArgs []string, mapped bool) []r
 		return translateLS(osName, rawArgs)
 	case "rm":
 		return translateRM(osName, rawArgs)
+	case "rmdir":
+		return passthroughResolved(rawArgs)
 	case "mkdir":
 		return translateMkdir(osName, rawArgs)
 	case "touch":

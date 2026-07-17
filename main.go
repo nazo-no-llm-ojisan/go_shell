@@ -9,12 +9,12 @@ import (
 
 // metaConfig holds global execution options parsed from -- flags.
 type metaConfig struct {
-	json               bool
-	cwd                string
-	timeout            time.Duration
-	env                []string
-	yes                bool // allow destructive operations
-	allowWindowsPwsh   bool // allow fallback to PowerShell 5.1
+	json             bool
+	cwd              string
+	timeout          time.Duration
+	env              []string
+	yes              bool // allow destructive operations
+	allowWindowsPwsh bool // allow fallback to PowerShell 5.1
 }
 
 func main() {

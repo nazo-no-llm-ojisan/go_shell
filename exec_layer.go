@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,6 +30,8 @@ type result struct {
 	Duration        string `json:"duration"`
 	Warning         string `json:"warning,omitempty"`
 	DryRun          bool   `json:"dry_run,omitempty"`
+	StdoutTruncated bool   `json:"stdout_truncated,omitempty"`
+	StderrTruncated bool   `json:"stderr_truncated,omitempty"`
 }
 
 func newResult(osName, backend, resolved string) *result {
@@ -163,9 +164,10 @@ func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
 		c.Dir = meta.cwd
 	}
 	c.Env = mergeEnv(meta.env)
-	var stdout, stderr bytes.Buffer
-	c.Stdout = &stdout
-	c.Stderr = &stderr
+	stdout := newLimitedBuffer(outputLimit(meta))
+	stderr := newLimitedBuffer(outputLimit(meta))
+	c.Stdout = stdout
+	c.Stderr = stderr
 	c.Stdin = os.Stdin
 
 	backend := "pwsh"
@@ -184,6 +186,8 @@ func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
 	res.Duration = time.Since(start).String()
 	res.Stdout = stdout.String()
 	res.Stderr = stderr.String()
+	res.StdoutTruncated = stdout.Truncated()
+	res.StderrTruncated = stderr.Truncated()
 	if runErr != nil {
 		res.OK = false
 		// Check timeout FIRST — CommandContext kill often surfaces as ExitError
@@ -287,9 +291,10 @@ func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaCon
 	}
 	c.Env = mergeEnv(meta.env)
 
-	var stdout, stderr bytes.Buffer
-	c.Stdout = &stdout
-	c.Stderr = &stderr
+	stdout := newLimitedBuffer(outputLimit(meta))
+	stderr := newLimitedBuffer(outputLimit(meta))
+	c.Stdout = stdout
+	c.Stderr = stderr
 	c.Stdin = os.Stdin
 
 	start := time.Now()
@@ -297,6 +302,8 @@ func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaCon
 	res.Duration = time.Since(start).String()
 	res.Stdout = stdout.String()
 	res.Stderr = stderr.String()
+	res.StdoutTruncated = stdout.Truncated()
+	res.StderrTruncated = stderr.Truncated()
 
 	if err != nil {
 		res.OK = false
@@ -325,6 +332,12 @@ func finalize(res *result, meta *metaConfig) {
 	} else {
 		os.Stdout.WriteString(res.Stdout)
 		os.Stderr.WriteString(res.Stderr)
+		if res.StdoutTruncated {
+			fmt.Fprintf(os.Stderr, "go_shell: warning: stdout truncated at %d bytes\n", outputLimit(meta))
+		}
+		if res.StderrTruncated {
+			fmt.Fprintf(os.Stderr, "go_shell: warning: stderr truncated at %d bytes\n", outputLimit(meta))
+		}
 	}
 	if !res.OK {
 		os.Exit(res.ExitCode)
@@ -481,6 +494,8 @@ func marshalLogLine(res *result) ([]byte, error) {
 		"duration":         res.Duration,
 		"stdout_len":       len(res.Stdout),
 		"stderr_len":       len(res.Stderr),
+		"stdout_truncated": res.StdoutTruncated,
+		"stderr_truncated": res.StderrTruncated,
 	}
 	line, err := json.Marshal(entry)
 	if err != nil {

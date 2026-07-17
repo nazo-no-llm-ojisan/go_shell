@@ -15,6 +15,7 @@ type metaConfig struct {
 	env              []string
 	yes              bool // allow destructive operations
 	allowWindowsPwsh bool // allow fallback to PowerShell 5.1
+	maxOutputBytes   int  // internal capture limit override used by tests
 }
 
 func main() {

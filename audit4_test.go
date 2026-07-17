@@ -14,20 +14,8 @@ import (
 // pattern.
 // ============================================================================
 
-// simulateShLine reproduces the line-building logic from execute()'s
-// sh/zsh/wsl branch, so we can assert quoting without actually launching
-// a subprocess. This mirrors the pwsh helper logic in audit3_test.go.
 func simulateShLine(cmd string, args []resolvedArg, mapped bool) string {
-	var line string
-	if mapped {
-		line = cmd
-	} else {
-		line = shQuote(cmd)
-	}
-	for _, a := range args {
-		line += " " + shQuote(a.Value)
-	}
-	return line
+	return buildShCommandLine(cmd, args, mapped)
 }
 
 func TestShPassthrough_QuotedCommandName(t *testing.T) {
@@ -149,15 +137,7 @@ func TestBackendSymmetry_CmdHandling(t *testing.T) {
 	args := []resolvedArg{{Value: "status", Raw: false}}
 
 	// pwsh line
-	pwshLine := ""
-	if false { // mapped=false
-		pwshLine += cmd
-	} else {
-		pwshLine += "& " + pwshQuote(cmd)
-	}
-	for _, a := range args {
-		pwshLine += " " + pwshQuote(a.Value)
-	}
+	pwshLine := buildPwshCommandLine(cmd, args, false)
 
 	// sh line
 	shLine := simulateShLine(cmd, args, false)

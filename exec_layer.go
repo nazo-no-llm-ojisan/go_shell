@@ -225,19 +225,7 @@ func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaCon
 		//
 		// Each arg is either Raw (translator flag like -Force) or a user value
 		// (always pwshQuote'd to prevent injection).
-		line := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::InputEncoding=[System.Text.Encoding]::UTF8; "
-		if mapped {
-			line += cmd
-		} else {
-			line += "& " + pwshQuote(cmd)
-		}
-		for _, a := range args {
-			if a.Raw {
-				line += " " + a.Value
-			} else {
-				line += " " + pwshQuote(a.Value)
-			}
-		}
+		line := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::InputEncoding=[System.Text.Encoding]::UTF8; " + buildPwshCommandLine(cmd, args, mapped)
 		shellPath, shellArgs, err := shellPathFor(backend, meta.allowWindowsPwsh)
 		if err != nil {
 			res.OK = false
@@ -268,15 +256,7 @@ func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaCon
 		// mapped=true: cmd is a translator-generated syntax fragment (e.g. "ls"),
 		// emitted raw. mapped=false (passthrough): cmd is a user-supplied command
 		// name, quoted to match pwsh backend behavior (& 'git' 'status').
-		var line string
-		if mapped {
-			line = cmd
-		} else {
-			line = shQuote(cmd)
-		}
-		for _, a := range args {
-			line += " " + shQuote(a.Value)
-		}
+		line := buildShCommandLine(cmd, args, mapped)
 		fullArgs := append(append([]string{}, shellArgs...), line)
 		c = exec.CommandContext(ctx, shellPath, fullArgs...)
 	default:

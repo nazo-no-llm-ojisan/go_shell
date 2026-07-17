@@ -1,8 +1,7 @@
 package main
 
 import (
-	"context"
-	"os/exec"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,12 +18,7 @@ func TestPwshArgQuoting_UserValueWithDashIsQuoted(t *testing.T) {
 	// This prevents injection like: -foo; Write-Output injected
 	arg := resolvedArg{Value: "-foo; Write-Output injected", Raw: false}
 	// Simulate the pwsh line building logic
-	line := "cmd"
-	if arg.Raw {
-		line += " " + arg.Value
-	} else {
-		line += " " + pwshQuote(arg.Value)
-	}
+	line := buildPwshCommandLine("cmd", []resolvedArg{arg}, true)
 	// The result must contain the quoted form, not the raw injection
 	if strings.Contains(line, arg.Value+" ") || strings.HasSuffix(line, arg.Value) {
 		t.Errorf("user value with dash was emitted raw (injection risk): %q", line)
@@ -37,12 +31,7 @@ func TestPwshArgQuoting_UserValueWithDashIsQuoted(t *testing.T) {
 func TestPwshArgQuoting_TranslatorFlagIsRaw(t *testing.T) {
 	// Translator-generated flags (e.g. -Force) are Raw=true and emitted as-is.
 	arg := resolvedArg{Value: "-Force", Raw: true}
-	line := "cmd"
-	if arg.Raw {
-		line += " " + arg.Value
-	} else {
-		line += " " + pwshQuote(arg.Value)
-	}
+	line := buildPwshCommandLine("cmd", []resolvedArg{arg}, true)
 	if !strings.Contains(line, "cmd -Force") {
 		t.Errorf("translator flag should be raw: %q", line)
 	}
@@ -117,69 +106,39 @@ func TestTranslateMkdir_PreservesUnknownDashArg(t *testing.T) {
 // --- P1: timeout must produce exit code 124 ---
 
 func TestTimeout_ProducesExit124(t *testing.T) {
-	// Use a real subprocess that sleeps longer than the timeout.
-	// We test the execute() function directly with a short timeout.
-	if _, err := exec.LookPath("sleep"); err != nil {
-		t.Skip("sleep not available on this platform")
+	if os.Getenv("GO_SHELL_TIMEOUT_HELPER") == "1" {
+		time.Sleep(10 * time.Second)
+		os.Exit(0)
 	}
-
-	res := newResult("linux", "sh", "sleep 10")
-	_ = &metaConfig{timeout: 100 * time.Millisecond}
-
-	// Run in a way that we can capture the result without os.Exit
-	// We need to test the exit code logic, but execute() calls os.Exit on failure.
-	// Instead, test the timeout detection logic directly.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "sleep", "10")
-	err := cmd.Run()
-
-	// Simulate the execute() error handling
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			res.ExitCode = 124
-		} else if _, ok := err.(*exec.ExitError); ok {
-			res.ExitCode = 99 // would be actual exit code
-		}
-	}
-
-	if res.ExitCode != 124 {
-		t.Errorf("timeout should produce exit 124, got %d", res.ExitCode)
+	t.Setenv("GO_SHELL_TIMEOUT_HELPER", "1")
+	res := newResult("native", "native", "timeout helper")
+	got := execute(res, "native", os.Args[0], []resolvedArg{{Value: "-test.run=^TestTimeout_ProducesExit124$"}}, &metaConfig{timeout: 50 * time.Millisecond}, false)
+	if got.ExitCode != 124 || got.OK {
+		t.Fatalf("timeout result = %+v, want exit 124 failure", got)
 	}
 }
 
 // --- P2: meta validation must be fail-closed ---
 
 func TestParseMeta_InvalidTimeoutIsFatal(t *testing.T) {
-	// We can't easily test os.Exit in unit tests, but we can verify that
-	// the validation logic rejects invalid durations.
-	// This is a smoke test — the real fatalMeta calls os.Exit(2).
-	_, err := time.ParseDuration("not-a-duration")
+	_, _, err := parseMetaChecked([]string{"--timeout", "not-a-duration", "-win", "-ls"})
 	if err == nil {
-		t.Error("expected ParseDuration to fail on invalid input")
+		t.Fatal("parseMetaChecked accepted invalid timeout")
 	}
 }
 
 func TestParseMeta_NegativeTimeoutRejected(t *testing.T) {
-	d, _ := time.ParseDuration("-5s")
-	if d > 0 {
-		t.Error("negative duration should not be positive")
+	_, _, err := parseMetaChecked([]string{"--timeout", "-5s", "-win", "-ls"})
+	if err == nil {
+		t.Fatal("parseMetaChecked accepted negative timeout")
 	}
-	// The parseMeta logic checks d <= 0 and rejects
-	if d <= 0 {
-		// correct — would be rejected
-		return
-	}
-	t.Error("negative duration should be <= 0 for rejection")
 }
 
 func TestParseMeta_EnvWithoutEqualsIsFatal(t *testing.T) {
-	// An --env value without "=" is malformed
-	val := "NOEQUALSHERE"
-	if strings.Contains(val, "=") {
-		t.Error("test value should not contain =")
+	_, _, err := parseMetaChecked([]string{"--env", "NOEQUALSHERE", "-win", "-ls"})
+	if err == nil {
+		t.Fatal("parseMetaChecked accepted malformed environment override")
 	}
-	// parseMeta would call fatalMeta for this — verified by logic
 }
 
 // --- P2: stubs must return failure (exit 78) ---

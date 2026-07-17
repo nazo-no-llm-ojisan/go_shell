@@ -23,19 +23,7 @@ func TestPwshPassthrough_UsesCallOperator(t *testing.T) {
 	args := []resolvedArg{{Value: "status", Raw: false}}
 	mapped := false
 
-	line := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
-	if mapped {
-		line += cmd
-	} else {
-		line += "& " + pwshQuote(cmd)
-	}
-	for _, a := range args {
-		if a.Raw {
-			line += " " + a.Value
-		} else {
-			line += " " + pwshQuote(a.Value)
-		}
-	}
+	line := buildPwshCommandLine(cmd, args, mapped)
 
 	if !strings.Contains(line, "& 'git'") {
 		t.Errorf("passthrough should use & call operator: %q", line)
@@ -56,12 +44,7 @@ func TestPwshPassthrough_CommandNameWithInjectionChars(t *testing.T) {
 	}
 	for _, cmd := range injectionCmds {
 		mapped := false
-		line := "& "
-		if mapped {
-			line += cmd
-		} else {
-			line += pwshQuote(cmd)
-		}
+		line := buildPwshCommandLine(cmd, nil, mapped)
 		// The raw injection text must not appear unquoted in the line
 		rawInjection := cmd + " "
 		if strings.Contains(line, rawInjection) || strings.HasSuffix(line, cmd) {
@@ -83,12 +66,7 @@ func TestPwshMapped_UsesRawSyntaxFragment(t *testing.T) {
 	cmd := "Get-ChildItem"
 	mapped := true
 
-	line := ""
-	if mapped {
-		line += cmd
-	} else {
-		line += "& " + pwshQuote(cmd)
-	}
+	line := buildPwshCommandLine(cmd, nil, mapped)
 	if line != "Get-ChildItem" {
 		t.Errorf("mapped cmd should be raw syntax, got %q", line)
 	}

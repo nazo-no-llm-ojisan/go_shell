@@ -87,6 +87,7 @@ func TestCLIJSONErrorsAreStructured(t *testing.T) {
 		want string
 	}{
 		{name: "invalid timeout", args: []string{"--json", "--timeout", "nope", "-win", "-ls"}, want: "invalid duration"},
+		{name: "json after invalid timeout", args: []string{"--timeout", "nope", "--json", "-win", "-ls"}, want: "invalid duration"},
 		{name: "missing command", args: []string{"--json", "-win"}, want: "no command given"},
 		{name: "unknown selector", args: []string{"--json", "-unknown"}, want: "unknown OS or function"},
 	}

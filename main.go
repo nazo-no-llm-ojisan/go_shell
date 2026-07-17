@@ -20,8 +20,10 @@ type metaConfig struct {
 
 func main() {
 	rawArgs := os.Args[1:]
+	jsonRequested := jsonMetaRequested(rawArgs)
 	meta, rest, err := parseMetaChecked(rawArgs)
 	if err != nil {
+		meta.json = jsonRequested
 		fail(meta, 2, err.Error())
 		return
 	}
@@ -53,6 +55,25 @@ func main() {
 		// not OS, not function → reject as likely hallucinated call
 		fail(meta, 2, fmt.Sprintf("unknown OS or function: -%s", stripped))
 	}
+}
+
+func jsonMetaRequested(args []string) bool {
+	for i := 0; i < len(args); {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "--") {
+			return false
+		}
+		if arg == "--json" {
+			return true
+		}
+		switch arg {
+		case "--cwd", "--timeout", "--env":
+			i += 2
+		default:
+			i++
+		}
+	}
+	return false
 }
 
 // parseMeta consumes leading -- flags. Stops at the first non-- arg.

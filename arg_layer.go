@@ -5,14 +5,16 @@ import "strings"
 // ============================================================================
 // Layer 2: Argument layer
 //
-// Interprets arguments and absorbs OS-specific differences.
 // For mapped commands, raw POSIX-ish flags are translated to the target
-// OS's convention. For passthrough commands, args are passed unchanged.
+// OS's convention. For passthrough commands, args are passed COMPLETELY
+// UNCHANGED — no dash stripping, no reordering, no interpretation.
 // ============================================================================
 
+// translateArgs converts logical args into OS-specific args.
+// Passthrough (mapped=false) → returns rawArgs unchanged (copy).
 func translateArgs(logicalCmd, osName string, rawArgs []string, mapped bool) []string {
 	if !mapped {
-		return cleanArgs(rawArgs)
+		return append([]string(nil), rawArgs...) //完全不変
 	}
 	switch logicalCmd {
 	case "ls":
@@ -23,24 +25,22 @@ func translateArgs(logicalCmd, osName string, rawArgs []string, mapped bool) []s
 		return translateMkdir(osName, rawArgs)
 	case "touch":
 		return translateTouch(osName, rawArgs)
-	case "cat", "cp", "mv", "pwd", "echo":
-		return cleanArgs(rawArgs)
+	case "echo":
+		return translateEcho(osName, rawArgs)
+	case "cat", "cp", "mv", "pwd":
+		// mapped but no flag translation needed — pass through unchanged
+		return append([]string(nil), rawArgs...)
 	default:
-		return cleanArgs(rawArgs)
+		return append([]string(nil), rawArgs...)
 	}
 }
 
-// cleanArgs strips a single leading dash from each arg so the execution
-// layer receives bare tokens, but preserves long options (--foo) as-is
-// since those are meaningful for passthrough commands (e.g. git --short).
-func cleanArgs(args []string) []string {
+// stripFlags removes leading dashes from short flags only, for use inside
+// mapped command translators. NOT used for passthrough.
+func stripFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	for _, a := range args {
-		if strings.HasPrefix(a, "--") {
-			out = append(out, a) // preserve long options
-		} else {
-			out = append(out, stripDash(a))
-		}
+		out = append(out, stripDash(a))
 	}
 	return out
 }
@@ -142,15 +142,33 @@ func translateMkdir(osName string, rawArgs []string) []string {
 }
 
 func translateTouch(osName string, rawArgs []string) []string {
-	// New-Item -ItemType File already fails if file exists; touch semantics
-	// differ, but for the simple case we just pass the filename.
-	return cleanArgs(rawArgs)
+	// touch on Windows is handled at exec layer (composite PowerShell).
+	// Args here are just paths — pass through unchanged.
+	return append([]string(nil), rawArgs...)
 }
 
+// translateEcho handles echo args. On Windows (Write-Output), args with
+// spaces need to be quoted at the exec layer; here we just pass them through
+// since pwshQuote is applied in exec_layer for non-flag args.
+func translateEcho(osName string, rawArgs []string) []string {
+	return append([]string(nil), rawArgs...)
+}
+
+// ============================================================================
+// Shell quoting — prevents arg splitting when args contain spaces
+// ============================================================================
+
 // pwshQuote wraps a single argument in PowerShell single-quote escaping.
-// This prevents injection when args are joined into a -Command string.
+// Prevents injection when args are joined into a -Command string.
 func pwshQuote(s string) string {
-	// Escape embedded single quotes: ' → ''
 	escaped := strings.ReplaceAll(s, "'", "''")
+	return "'" + escaped + "'"
+}
+
+// shQuote wraps a single argument in POSIX shell single-quote escaping.
+// Used for sh/zsh/wsl backends when building a -c command string.
+func shQuote(s string) string {
+	// Escape embedded single quotes: ' → '\''
+	escaped := strings.ReplaceAll(s, "'", "'\\''")
 	return "'" + escaped + "'"
 }

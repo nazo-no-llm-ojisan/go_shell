@@ -73,10 +73,10 @@ func backendFor(osName string) string {
 
 // shellFor returns the preferred shell binary + default args for the backend.
 // Second return is whether the shell exists in PATH.
-func shellPathFor(backend string) (string, []string, error) {
+func shellPathFor(backend string, allowWindowsPwsh bool) (string, []string, error) {
 	switch backend {
 	case "pwsh":
-		return lookupPwsh()
+		return lookupPwsh(allowWindowsPwsh)
 	case "sh":
 		return "/bin/sh", []string{"-c"}, nil
 	case "zsh":
@@ -94,10 +94,15 @@ type errUnknownBackend string
 
 func (e errUnknownBackend) Error() string { return "unknown backend: " + string(e) }
 
-func lookupPwsh() (string, []string, error) {
-	// Prefer pwsh (PowerShell 7+), fallback to powershell.exe
-	for _, name := range []string{"pwsh", "powershell"} {
-		if p, err := execLookPath(name); err == nil {
+func lookupPwsh(allowWindowsPwsh bool) (string, []string, error) {
+	// Prefer pwsh (PowerShell 7+) — UTF-8 safe, no encoding surprises.
+	if p, err := execLookPath("pwsh"); err == nil {
+		return p, []string{"-NoProfile", "-NonInteractive", "-Command"}, nil
+	}
+	// Fallback to Windows PowerShell 5.1 only if explicitly allowed.
+	// 5.1 has encoding quirks that can corrupt non-ASCII output.
+	if allowWindowsPwsh {
+		if p, err := execLookPath("powershell"); err == nil {
 			return p, []string{"-NoProfile", "-NonInteractive", "-Command"}, nil
 		}
 	}
@@ -107,7 +112,7 @@ func lookupPwsh() (string, []string, error) {
 type errNoPwsh struct{}
 
 func (errNoPwsh) Error() string {
-	return "neither pwsh nor powershell found in PATH"
+	return "pwsh (PowerShell 7) not found in PATH; install PowerShell 7 or pass --allow-windows-powershell"
 }
 
 // execLookPath is a seam for testing; real impl in exec_layer.go

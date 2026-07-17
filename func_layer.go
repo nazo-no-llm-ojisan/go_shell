@@ -12,6 +12,9 @@ import (
 // First arg is NOT an OS → treat it as a function name.
 // Functions are registered Go functions invoked directly (no shell).
 // Unknown function names are rejected (no silent passthrough to shell).
+//
+// IMPORTANT: function args are DATA — never stripDash them.
+// A path like "-file.txt" or content like "-hello" must be preserved as-is.
 // ============================================================================
 
 type shellFunc func(args []string, meta *metaConfig) *result
@@ -80,16 +83,17 @@ func fnReadHermesSession(args []string, meta *metaConfig) *result {
 
 // fnWriteFile: write_file <path> <content>
 // content is read from stdin if "-" is given, else taken as literal.
+// Args are DATA — no stripDash.
 func fnWriteFile(args []string, meta *metaConfig) *result {
 	if len(args) < 2 {
 		return &result{
-			OK:      false,
+			OK:       false,
 			ExitCode: 2,
-			Stderr:  "write_file: requires <path> <content>",
+			Stderr:   "write_file: requires <path> <content>",
 		}
 	}
-	path := stripDash(args[0])
-	content := stripDash(args[1])
+	path := args[0]
+	content := args[1]
 	if content == "-" {
 		buf := make([]byte, 0, 4096)
 		tmp := make([]byte, 4096)
@@ -119,13 +123,13 @@ func fnWriteFile(args []string, meta *metaConfig) *result {
 func fnCopyFile(args []string, meta *metaConfig) *result {
 	if len(args) < 2 {
 		return &result{
-			OK:      false,
+			OK:       false,
 			ExitCode: 2,
-			Stderr:  "copy_file: requires <src> <dst>",
+			Stderr:   "copy_file: requires <src> <dst>",
 		}
 	}
-	src := stripDash(args[0])
-	dst := stripDash(args[1])
+	src := args[0]
+	dst := args[1]
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return &result{OK: false, ExitCode: 1, Stderr: err.Error()}
@@ -146,7 +150,7 @@ func fnOpenURL(args []string, meta *metaConfig) *result {
 	if len(args) < 1 {
 		return &result{OK: false, ExitCode: 2, Stderr: "open_url: requires <url>"}
 	}
-	url := stripDash(args[0])
+	url := args[0]
 	// Stub — actual OS-specific open command to be wired later.
 	j, _ := json.Marshal(map[string]string{"url": url, "status": "stub"})
 	return &result{

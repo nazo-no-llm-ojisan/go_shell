@@ -9,10 +9,12 @@ import (
 
 // metaConfig holds global execution options parsed from -- flags.
 type metaConfig struct {
-	json    bool
-	cwd     string
-	timeout time.Duration
-	env     []string
+	json               bool
+	cwd                string
+	timeout            time.Duration
+	env                []string
+	yes                bool // allow destructive operations
+	allowWindowsPwsh   bool // allow fallback to PowerShell 5.1
 }
 
 func main() {
@@ -59,6 +61,12 @@ func parseMeta(args []string) (*metaConfig, []string) {
 		case "--json":
 			meta.json = true
 			i++
+		case "--yes":
+			meta.yes = true
+			i++
+		case "--allow-windows-powershell":
+			meta.allowWindowsPwsh = true
+			i++
 		case "--cwd":
 			if i+1 < len(args) {
 				meta.cwd = args[i+1]
@@ -97,7 +105,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  go_shell [meta...] -<function> [args...]")
 	fmt.Fprintln(os.Stderr, "  go_shell [meta...] <command> [args...]  (auto OS)")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Meta:  --json --cwd DIR --timeout DUR --env K=V")
+	fmt.Fprintln(os.Stderr, "Meta:  --json --yes --cwd DIR --timeout DUR --env K=V --allow-windows-powershell")
 	fmt.Fprintf(os.Stderr, "OS:    %s\n", strings.Join(osList(), ", "))
 	fmt.Fprintf(os.Stderr, "Funcs: %s\n", strings.Join(funcList(), ", "))
 }

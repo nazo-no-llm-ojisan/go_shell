@@ -110,25 +110,11 @@ func TestMergeEnv_OverridesExisting(t *testing.T) {
 	}
 }
 
-func TestMergeEnv_CaseInsensitiveOverride_Windows(t *testing.T) {
-	// Windows env vars are case-insensitive. PATH and Path should collide.
-	t.Setenv("PATH", "/original/bin")
-	// Override with different case
-	merged := mergeEnv([]string{"Path=/new/bin"})
-	pathCount := 0
-	for _, kv := range merged {
-		upper := strings.ToUpper(kv)
-		if strings.HasPrefix(upper, "PATH=") {
-			pathCount++
-			if !strings.HasSuffix(kv, "/new/bin") {
-				t.Errorf("PATH not overridden case-insensitively: %q", kv)
-			}
-		}
-	}
-	if pathCount != 1 {
-		t.Errorf("expected 1 PATH entry, got %d (should merge case-insensitively)", pathCount)
-	}
-}
+// TestMergeEnv_CaseInsensitiveOverride_Windows was here and is now covered
+// by audit3_test.go's TestMergeEnvForOS_WindowsCaseInsensitive, which uses
+// the pure mergeEnvForOS(base, extra, "windows") form so it is deterministic
+// on Linux CI. mergeEnv() depends on runtime.GOOS and cannot test Windows
+// semantics on a Linux runner.
 
 func TestMergeEnv_NoExtra(t *testing.T) {
 	// No --env → return os.Environ() unchanged

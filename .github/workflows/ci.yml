@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.21"
+          cache: false
       - name: Gofmt check
         run: |
           out=$(gofmt -l .)
@@ -36,6 +37,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.21"
+          cache: false
       - name: Gofmt check
         run: |
           out=$(gofmt -l .)

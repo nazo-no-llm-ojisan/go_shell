@@ -103,6 +103,11 @@ With `--json`, the result is always a single JSON object:
 }
 ```
 
+Command stdout and stderr are captured up to 16 MiB per stream. If either
+limit is exceeded, the retained output is returned and the JSON result sets
+`stdout_truncated` or `stderr_truncated` to `true`. Non-JSON mode prints an
+equivalent warning to stderr.
+
 Destructive operations without `--yes` return a `dry_run` result instead of executing:
 
 ```json

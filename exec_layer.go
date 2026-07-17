@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -152,21 +153,23 @@ func runTouchWindows(args []string, meta *metaConfig, osName string) {
 		ResolvedCommand: "touch(composite) " + strings.Join(args, " "),
 	}
 	start := time.Now()
-	if err := c.Run(); err != nil {
+	runErr := c.Run()
+	res.Duration = time.Since(start).String()
+	// Capture stdout/stderr FIRST, then layer error/timeout info on top.
+	res.Stdout = stdout.String()
+	res.Stderr = stderr.String()
+	if runErr != nil {
 		res.OK = false
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
 			res.ExitCode = exitErr.ExitCode()
 		} else if ctx.Err() == context.DeadlineExceeded {
 			res.ExitCode = 124
-			res.Stderr = "go_shell: timeout after " + meta.timeout.String()
+			res.Stderr = stderr.String() + "go_shell: timeout after " + meta.timeout.String()
 		} else {
 			res.ExitCode = 1
-			res.Stderr = err.Error()
+			res.Stderr = stderr.String() + runErr.Error()
 		}
 	}
-	res.Stdout = stdout.String()
-	res.Stderr = stderr.String()
-	res.Duration = time.Since(start).String()
 	if backend == "powershell-5.1" {
 		res.Warning = "PowerShell 7 (pwsh) was not found; using Windows PowerShell 5.1 — output encoding may differ."
 	}
@@ -279,23 +282,28 @@ func finalize(res *result, meta *metaConfig) {
 }
 
 // mergeEnv merges extra K=V pairs into the current environment.
-// On Windows, env var names are case-insensitive, so we upper-case keys
-// for comparison to ensure --env PATH=... actually overrides an existing PATH.
+// On Windows, env var names are case-insensitive (PATH == Path).
+// On Linux/macOS, names are case-sensitive (PATH != Path).
+// Go's runtime.GOOS is used to pick the correct comparison strategy.
 func mergeEnv(extra []string) []string {
 	if len(extra) == 0 {
 		return os.Environ()
 	}
-	// Build a map from upper-cased key → original key, to detect collisions.
-	envMap := make(map[string]string) // upperKey → last value
-	keyOrder := make(map[string]string) // upperKey → original key (first seen)
+	// Build a map keyed by the comparison form (upper on Windows, as-is elsewhere).
+	envMap := make(map[string]string) // compareKey → "KEY=VALUE" string
+	keyOrder := make(map[string]string) // compareKey → original key (first seen)
+	normalize := envKeyNormalizer() // func(string) string
+
 	for _, kv := range os.Environ() {
 		key := kv
 		if idx := strings.Index(kv, "="); idx >= 0 {
 			key = kv[:idx]
 		}
-		upper := strings.ToUpper(key)
-		envMap[upper] = kv
-		keyOrder[upper] = key
+		nk := normalize(key)
+		envMap[nk] = kv
+		if _, exists := keyOrder[nk]; !exists {
+			keyOrder[nk] = key
+		}
 	}
 	for _, kv := range extra {
 		key := kv
@@ -304,18 +312,27 @@ func mergeEnv(extra []string) []string {
 			key = kv[:idx]
 			val = kv[idx+1:]
 		}
-		upper := strings.ToUpper(key)
-		if _, exists := keyOrder[upper]; !exists {
-			keyOrder[upper] = key
+		nk := normalize(key)
+		if _, exists := keyOrder[nk]; !exists {
+			keyOrder[nk] = key
 		}
-		envMap[upper] = key + "=" + val
+		envMap[nk] = key + "=" + val
 	}
 	out := make([]string, 0, len(envMap))
-	for upper, kv := range envMap {
-		_ = upper
+	for _, kv := range envMap {
 		out = append(out, kv)
 	}
 	return out
+}
+
+// envKeyNormalizer returns a function that normalizes env var keys for
+// comparison. On Windows, keys are upper-cased (case-insensitive).
+// On Linux/macOS, keys are returned as-is (case-sensitive).
+func envKeyNormalizer() func(string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper
+	}
+	return func(s string) string { return s }
 }
 
 // ============================================================================

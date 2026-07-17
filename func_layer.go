@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 )
 
 // ============================================================================
@@ -38,6 +39,7 @@ func funcList() []string {
 	for name := range functionRegistry {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 

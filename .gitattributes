@@ -1,0 +1,11 @@
+# Auto-detect text files and force LF normalization.
+# Prevents CRLF checkout on Windows CI (gofmt rejects CRLF Go files).
+* text=auto eol=lf
+
+# Windows batch files require CRLF for proper execution
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary
+*.exe binary
+go_shell binary

@@ -1,0 +1,10 @@
+# Binary
+go_shell.exe
+go_shell
+
+# Test artifacts
+*.out
+*.test
+
+# Logs
+.go_shell/

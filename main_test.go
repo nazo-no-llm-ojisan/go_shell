@@ -136,7 +136,7 @@ func TestTranslateLS_Win(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := translateLS("win", c.args)
-		if !sliceEq(got, c.want) {
+		if !sliceEq(resolvedValues(got), c.want) {
 			t.Errorf("translateLS(win, %v) = %v, want %v", c.args, got, c.want)
 		}
 	}
@@ -157,7 +157,7 @@ func TestTranslateLS_Linux(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := translateLS("linux", c.args)
-		if !sliceEq(got, c.want) {
+		if !sliceEq(resolvedValues(got), c.want) {
 			t.Errorf("translateLS(linux, %v) = %v, want %v", c.args, got, c.want)
 		}
 	}
@@ -176,7 +176,7 @@ func TestTranslateRM_Win(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := translateRM("win", c.args)
-		if !sliceEq(got, c.want) {
+		if !sliceEq(resolvedValues(got), c.want) {
 			t.Errorf("translateRM(win, %v) = %v, want %v", c.args, got, c.want)
 		}
 	}
@@ -195,7 +195,7 @@ func TestTranslateRM_Linux(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := translateRM("linux", c.args)
-		if !sliceEq(got, c.want) {
+		if !sliceEq(resolvedValues(got), c.want) {
 			t.Errorf("translateRM(linux, %v) = %v, want %v", c.args, got, c.want)
 		}
 	}
@@ -204,7 +204,7 @@ func TestTranslateRM_Linux(t *testing.T) {
 func TestTranslateMkdir_Win(t *testing.T) {
 	got := translateMkdir("win", []string{"-p", "newdir"})
 	want := []string{"-Force", "newdir"}
-	if !sliceEq(got, want) {
+	if !sliceEq(resolvedValues(got), want) {
 		t.Errorf("translateMkdir(win, -p newdir) = %v, want %v", got, want)
 	}
 }
@@ -212,7 +212,7 @@ func TestTranslateMkdir_Win(t *testing.T) {
 func TestTranslateMkdir_Linux(t *testing.T) {
 	got := translateMkdir("linux", []string{"-p", "newdir"})
 	want := []string{"-p", "newdir"}
-	if !sliceEq(got, want) {
+	if !sliceEq(resolvedValues(got), want) {
 		t.Errorf("translateMkdir(linux, -p newdir) = %v, want %v", got, want)
 	}
 }
@@ -221,7 +221,7 @@ func TestTranslateArgs_Passthrough(t *testing.T) {
 	// unmapped command → args returned stripped of dash, no translation
 	got := translateArgs("git", "win", []string{"status", "--short"}, false)
 	want := []string{"status", "--short"}
-	if !sliceEq(got, want) {
+	if !sliceEq(resolvedValues(got), want) {
 		t.Errorf("translateArgs(git, passthrough) = %v, want %v", got, want)
 	}
 }
@@ -297,7 +297,7 @@ func TestFuncList_ContainsAllRegistered(t *testing.T) {
 // ============================================================================
 // helpers
 // ============================================================================
-
+// sliceEq compares two string slices.
 func sliceEq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -308,4 +308,13 @@ func sliceEq(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// resolvedValues extracts the .Value fields from a slice of resolvedArg.
+func resolvedValues(args []resolvedArg) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		out = append(out, a.Value)
+	}
+	return out
 }

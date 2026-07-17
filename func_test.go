@@ -73,11 +73,15 @@ func TestFnCopyFile_MissingSrc(t *testing.T) {
 
 func TestFnOpenURL_Stub(t *testing.T) {
 	res := fnOpenURL([]string{"https://example.com"}, &metaConfig{})
-	if res == nil || !res.OK {
-		t.Fatalf("open_url stub failed: %+v", res)
+	if res == nil {
+		t.Fatal("open_url returned nil")
 	}
-	if !strings.Contains(res.Stdout, "https://example.com") {
-		t.Errorf("open_url stdout = %q, want URL in output", res.Stdout)
+	// open_url is a stub — must return failure (not implemented)
+	if res.OK {
+		t.Errorf("open_url stub returned OK=true, want false")
+	}
+	if res.ExitCode != stubExitCode {
+		t.Errorf("open_url exit_code = %d, want %d", res.ExitCode, stubExitCode)
 	}
 }
 
@@ -85,7 +89,7 @@ func TestFnOpenURL_Stub(t *testing.T) {
 // Stub functions exist and return results
 // ============================================================================
 
-func TestStubFunctions_ReturnResults(t *testing.T) {
+func TestStubFunctions_ReturnFailureResults(t *testing.T) {
 	stubs := []string{"create_hermes_subagent", "run_hermes_task", "read_hermes_session"}
 	for _, name := range stubs {
 		fn, ok := functionRegistry[name]
@@ -98,11 +102,16 @@ func TestStubFunctions_ReturnResults(t *testing.T) {
 			t.Errorf("stub %q returned nil result", name)
 			continue
 		}
-		if !res.OK {
-			t.Errorf("stub %q returned OK=false: %+v", name, res)
+		// Stubs must return failure to prevent agents from treating
+		// unimplemented functions as successful.
+		if res.OK {
+			t.Errorf("stub %q returned OK=true, want false (unimplemented)", name)
 		}
-		if !strings.Contains(res.Stdout, "[stub]") {
-			t.Errorf("stub %q stdout = %q, want [stub] marker", name, res.Stdout)
+		if res.ExitCode != stubExitCode {
+			t.Errorf("stub %q exit_code = %d, want %d", name, res.ExitCode, stubExitCode)
+		}
+		if !strings.Contains(res.Stderr, "not implemented") {
+			t.Errorf("stub %q stderr = %q, want 'not implemented' marker", name, res.Stderr)
 		}
 	}
 }

@@ -144,10 +144,11 @@ Git Bash is **never** invoked.
 
 `go_shell` executes local commands and may modify or delete files. Treat any agent that can invoke `go_shell` as having local execution capability.
 
-- `rm` and `rmdir` require `--yes`.
+- `rm` and `rmdir` require `--yes`. This is a **UX guard against accidental mapped-command misuse, not a security boundary or sandbox.** Passthrough commands (`Remove-Item`, `cmd /c del`, `sh -c "rm -rf ..."`) are not intercepted.
 - Do not expose `go_shell` directly to untrusted remote input.
 - Do not pass secrets as command-line arguments — they are visible in process listings and in `~/.go_shell/log.jsonl`.
 - Prefer environment variables (`--env`) or explicit secret-management integration.
+- Unimplemented registered functions return exit code 78 (failure), never a false positive.
 
 Every execution is appended to `~/.go_shell/log.jsonl` with timestamp, resolved command, backend, exit code, and output sizes.
 

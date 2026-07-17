@@ -47,8 +47,9 @@ func main() {
 	}
 }
 
-// parseMeta consumes leading -- flags. Stops at the first non-- arg or
-// unknown -- arg (which becomes part of the command).
+// parseMeta consumes leading -- flags. Stops at the first non-- arg.
+// Invalid meta values (missing value, unparseable duration, malformed env)
+// are fatal — fail-closed is appropriate for an agent execution runtime.
 func parseMeta(args []string) (*metaConfig, []string) {
 	meta := &metaConfig{timeout: 60 * time.Second}
 	i := 0
@@ -68,33 +69,44 @@ func parseMeta(args []string) (*metaConfig, []string) {
 			meta.allowWindowsPwsh = true
 			i++
 		case "--cwd":
-			if i+1 < len(args) {
-				meta.cwd = args[i+1]
-				i += 2
-			} else {
-				i++
+			if i+1 >= len(args) {
+				fatalMeta("--cwd requires a directory path")
 			}
+			meta.cwd = args[i+1]
+			i += 2
 		case "--timeout":
-			if i+1 < len(args) {
-				if d, err := time.ParseDuration(args[i+1]); err == nil {
-					meta.timeout = d
-				}
-				i += 2
-			} else {
-				i++
+			if i+1 >= len(args) {
+				fatalMeta("--timeout requires a duration (e.g. 30s, 2m)")
 			}
+			d, err := time.ParseDuration(args[i+1])
+			if err != nil {
+				fatalMeta("--timeout: invalid duration " + args[i+1])
+			}
+			if d <= 0 {
+				fatalMeta("--timeout: must be positive")
+			}
+			meta.timeout = d
+			i += 2
 		case "--env":
-			if i+1 < len(args) {
-				meta.env = append(meta.env, args[i+1])
-				i += 2
-			} else {
-				i++
+			if i+1 >= len(args) {
+				fatalMeta("--env requires KEY=VALUE")
 			}
+			if !strings.Contains(args[i+1], "=") {
+				fatalMeta("--env: expected KEY=VALUE, got " + args[i+1])
+			}
+			meta.env = append(meta.env, args[i+1])
+			i += 2
 		default:
-			return meta, args[i:]
+			// Unknown -- flag → fatal (fail-closed)
+			fatalMeta("unknown meta flag: " + a)
 		}
 	}
 	return meta, args[i:]
+}
+
+func fatalMeta(msg string) {
+	fmt.Fprintln(os.Stderr, "go_shell: "+msg)
+	os.Exit(2)
 }
 
 func printUsage() {

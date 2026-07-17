@@ -27,7 +27,7 @@ func TestPassthrough_PreservesDashes(t *testing.T) {
 	}
 	for _, c := range cases {
 		got := translateArgs(c.cmd, "win", c.args, false)
-		if !sliceEq(got, c.args) {
+		if !sliceEq(resolvedValues(got), c.args) {
 			t.Errorf("translateArgs(%q, passthrough) = %v, want %v (unchanged)", c.cmd, got, c.args)
 		}
 	}
@@ -36,7 +36,7 @@ func TestPassthrough_PreservesDashes(t *testing.T) {
 func TestPassthrough_PreservesDashes_Linux(t *testing.T) {
 	got := translateArgs("git", "linux", []string{"-C", "/tmp", "status"}, false)
 	want := []string{"-C", "/tmp", "status"}
-	if !sliceEq(got, want) {
+	if !sliceEq(resolvedValues(got), want) {
 		t.Errorf("passthrough linux = %v, want %v", got, want)
 	}
 }
@@ -162,13 +162,13 @@ func TestShQuote_Basic(t *testing.T) {
 // --- Destructive operation policy ---
 
 func TestIsDestructive_Rm(t *testing.T) {
-	if !isDestructive("rm", []string{"-rf", "/tmp"}) {
+	if !isDestructive("rm") {
 		t.Error("rm should be destructive")
 	}
 }
 
 func TestIsDestructive_Ls(t *testing.T) {
-	if isDestructive("ls", []string{"-al"}) {
+	if isDestructive("ls") {
 		t.Error("ls should not be destructive")
 	}
 }

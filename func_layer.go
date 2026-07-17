@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -59,15 +58,19 @@ func runFunctionMode(name string, args []string, meta *metaConfig) {
 }
 
 // --- stub implementations ---
+// Stubs return failure (exit 78, "function not implemented") to prevent
+// agents from treating unimplemented functions as successful.
+
+const stubExitCode = 78 // EX_CONFIG — function registered but not implemented
 
 func stubResult(name string, args []string) *result {
 	return &result{
-		OK:              true,
-		ExitCode:        0,
+		OK:              false,
+		ExitCode:        stubExitCode,
 		Backend:         "go-internal",
 		OSMode:          "function",
 		ResolvedCommand: fmt.Sprintf("%s(%v)", name, args),
-		Stdout:          fmt.Sprintf("[stub] %s args=%v (not yet implemented)\n", name, args),
+		Stderr:          fmt.Sprintf("go_shell: %s: function not implemented (stub)\n", name),
 	}
 }
 
@@ -152,14 +155,6 @@ func fnOpenURL(args []string, meta *metaConfig) *result {
 	if len(args) < 1 {
 		return &result{OK: false, ExitCode: 2, Stderr: "open_url: requires <url>"}
 	}
-	url := args[0]
 	// Stub — actual OS-specific open command to be wired later.
-	j, _ := json.Marshal(map[string]string{"url": url, "status": "stub"})
-	return &result{
-		OK:              true,
-		ExitCode:        0,
-		Backend:         "go-internal",
-		ResolvedCommand: fmt.Sprintf("open_url(%s)", url),
-		Stdout:          string(j) + "\n",
-	}
+	return stubResult("open_url", args)
 }

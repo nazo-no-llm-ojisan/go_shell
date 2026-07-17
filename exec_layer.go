@@ -58,11 +58,11 @@ func runOSMode(osName string, args []string, meta *metaConfig) {
 	translatedArgs := translateArgs(logicalCmd, concrete, rawArgs, mapped)
 
 	// Destructive operation check
-	if isDestructive(logicalCmd, translatedArgs) && !meta.yes {
+	if isDestructive(logicalCmd) && !meta.yes {
 		dryRunResult := newResult(concrete, backendFor(concrete), joinCommand(concreteCmd, translatedArgs))
 		dryRunResult.OK = true
 		dryRunResult.DryRun = true
-		dryRunResult.Stdout = fmt.Sprintf("[dry-run] destructive operation blocked without --yes\n  resolved: %s\n  args: %v\n", dryRunResult.ResolvedCommand, translatedArgs)
+		dryRunResult.Stdout = fmt.Sprintf("[dry-run] destructive operation blocked without --yes\n  resolved: %s\n  args: %s\n", dryRunResult.ResolvedCommand, argSummary(translatedArgs))
 		finalize(dryRunResult, meta)
 		return
 	}
@@ -94,25 +94,42 @@ func resolveAutoOSIfAuto(osName string) string {
 	return osName
 }
 
-func joinCommand(cmd string, args []string) string {
-	parts := append([]string{cmd}, args...)
+// joinCommand builds a display string from cmd + resolvedArgs.
+func joinCommand(cmd string, args []resolvedArg) string {
+	parts := []string{cmd}
+	for _, a := range args {
+		parts = append(parts, a.Value)
+	}
 	return strings.Join(parts, " ")
 }
 
-// isDestructive returns true for commands that can delete or overwrite
-// significant amounts of data, requiring --yes to execute.
-func isDestructive(logicalCmd string, args []string) bool {
+// argSummary returns a debug summary of resolvedArgs (value + raw flag).
+func argSummary(args []resolvedArg) string {
+	parts := make([]string, 0, len(args))
+	for _, a := range args {
+		if a.Raw {
+			parts = append(parts, fmt.Sprintf("%s(raw)", a.Value))
+		} else {
+			parts = append(parts, a.Value)
+		}
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// isDestructive returns true for mapped commands that can delete data.
+// NOTE: This is a UX guard against accidental mapped -rm/-rmdir, NOT a
+// security boundary. Passthrough commands (Remove-Item, cmd /c del, etc.)
+// are not intercepted. See README Security section.
+func isDestructive(logicalCmd string) bool {
 	switch logicalCmd {
-	case "rm":
-		return true // any rm is destructive
-	case "rmdir":
+	case "rm", "rmdir":
 		return true
 	}
 	return false
 }
 
 // runTouchWindows implements Unix-compatible touch on Windows via composite PowerShell.
-func runTouchWindows(args []string, meta *metaConfig, osName string) {
+func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
 	shellPath, shellArgs, err := shellPathFor("pwsh", meta.allowWindowsPwsh)
 	if err != nil {
 		res := &result{OK: false, ExitCode: 127, Stderr: err.Error(), OSMode: osName, Backend: "pwsh"}
@@ -120,13 +137,16 @@ func runTouchWindows(args []string, meta *metaConfig, osName string) {
 		return
 	}
 
-	// Build: foreach ($p in 'path1','path2') { if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTime = Get-Date } else { New-Item -ItemType File -Path $p } | Out-Null }
+	// Build: foreach ($p in 'path1','path2') { if (Test-Path -LiteralPath $p) { ... } else { ... } }
+	// All user paths are pwshQuote'd to prevent injection.
 	var paths []string
+	var displayPaths []string
 	for _, a := range args {
-		paths = append(paths, pwshQuote(a))
+		paths = append(paths, pwshQuote(a.Value))
+		displayPaths = append(displayPaths, a.Value)
 	}
 	script := fmt.Sprintf(
-		"foreach ($p in %s) { if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTime = Get-Date } else { New-Item -ItemType File -Path $p | Out-Null } }",
+		"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; foreach ($p in %s) { if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTime = Get-Date } else { New-Item -ItemType File -Path $p | Out-Null } }",
 		strings.Join(paths, ","))
 	fullArgs := append(append([]string{}, shellArgs...), script)
 
@@ -150,21 +170,22 @@ func runTouchWindows(args []string, meta *metaConfig, osName string) {
 		OK:              true,
 		Backend:         backend,
 		OSMode:          osName,
-		ResolvedCommand: "touch(composite) " + strings.Join(args, " "),
+		ResolvedCommand: "touch(composite) " + strings.Join(displayPaths, " "),
 	}
+
 	start := time.Now()
 	runErr := c.Run()
 	res.Duration = time.Since(start).String()
-	// Capture stdout/stderr FIRST, then layer error/timeout info on top.
 	res.Stdout = stdout.String()
 	res.Stderr = stderr.String()
 	if runErr != nil {
 		res.OK = false
-		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			res.ExitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
+		// Check timeout FIRST — CommandContext kill often surfaces as ExitError
+		if ctx.Err() == context.DeadlineExceeded {
 			res.ExitCode = 124
 			res.Stderr = stderr.String() + "go_shell: timeout after " + meta.timeout.String()
+		} else if exitErr, ok := runErr.(*exec.ExitError); ok {
+			res.ExitCode = exitErr.ExitCode()
 		} else {
 			res.ExitCode = 1
 			res.Stderr = stderr.String() + runErr.Error()
@@ -177,23 +198,23 @@ func runTouchWindows(args []string, meta *metaConfig, osName string) {
 	finalize(res, meta)
 }
 
-func execute(res *result, backend, cmd string, args []string, meta *metaConfig) *result {
+func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaConfig) *result {
 	ctx, cancel := context.WithTimeout(context.Background(), meta.timeout)
 	defer cancel()
 
 	var c *exec.Cmd
 	switch backend {
 	case "pwsh":
-		// Build a single -Command string with proper single-quote escaping.
-		// cmd itself may contain spaces (e.g. "New-Item -ItemType Directory"),
-		// so we treat it as a command fragment and quote each arg.
-		// Prefix with UTF-8 encoding setup to prevent CJK/coded text corruption.
+		// Build a single -Command string. cmd is a translator-generated
+		// syntax fragment (e.g. "Get-ChildItem", "New-Item -ItemType Directory").
+		// Each arg is either Raw (translator flag like -Force) or a user value
+		// (always pwshQuote'd to prevent injection).
 		line := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; [Console]::InputEncoding=[System.Text.Encoding]::UTF8; " + cmd
 		for _, a := range args {
-			if strings.HasPrefix(a, "-") {
-				line += " " + a // flag-style: pass as-is
+			if a.Raw {
+				line += " " + a.Value
 			} else {
-				line += " " + pwshQuote(a)
+				line += " " + pwshQuote(a.Value)
 			}
 		}
 		shellPath, shellArgs, err := shellPathFor(backend, meta.allowWindowsPwsh)
@@ -203,14 +224,18 @@ func execute(res *result, backend, cmd string, args []string, meta *metaConfig) 
 			res.Stderr = err.Error()
 			return res
 		}
-		// Track if we fell back to 5.1
 		if !strings.Contains(shellPath, "pwsh") {
 			res.Backend = "powershell-5.1"
 		}
 		fullArgs := append(append([]string{}, shellArgs...), line)
 		c = exec.CommandContext(ctx, shellPath, fullArgs...)
 	case "native":
-		c = exec.CommandContext(ctx, cmd, args...)
+		// Direct exec — no shell. args are passed as argv (no quoting needed).
+		rawArgs := make([]string, 0, len(args))
+		for _, a := range args {
+			rawArgs = append(rawArgs, a.Value)
+		}
+		c = exec.CommandContext(ctx, cmd, rawArgs...)
 	case "sh", "zsh", "wsl":
 		shellPath, shellArgs, err := shellPathFor(backend, meta.allowWindowsPwsh)
 		if err != nil {
@@ -219,10 +244,11 @@ func execute(res *result, backend, cmd string, args []string, meta *metaConfig) 
 			res.Stderr = err.Error()
 			return res
 		}
-		// Quote each arg with shQuote to prevent word-splitting on spaces.
+		// Quote each arg with shQuote. Raw flags are also quoted for POSIX
+		// shells since "-Force" is just a string to sh.
 		line := cmd
 		for _, a := range args {
-			line += " " + shQuote(a)
+			line += " " + shQuote(a.Value)
 		}
 		fullArgs := append(append([]string{}, shellArgs...), line)
 		c = exec.CommandContext(ctx, shellPath, fullArgs...)
@@ -251,11 +277,12 @@ func execute(res *result, backend, cmd string, args []string, meta *metaConfig) 
 
 	if err != nil {
 		res.OK = false
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			res.ExitCode = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
+		// Check timeout FIRST — CommandContext kill often surfaces as ExitError
+		if ctx.Err() == context.DeadlineExceeded {
 			res.ExitCode = 124
-			res.Stderr = "go_shell: timeout after " + meta.timeout.String()
+			res.Stderr = stderr.String() + "go_shell: timeout after " + meta.timeout.String()
+		} else if exitErr, ok := err.(*exec.ExitError); ok {
+			res.ExitCode = exitErr.ExitCode()
 		} else {
 			res.ExitCode = 1
 			if res.Stderr == "" {
@@ -284,15 +311,13 @@ func finalize(res *result, meta *metaConfig) {
 // mergeEnv merges extra K=V pairs into the current environment.
 // On Windows, env var names are case-insensitive (PATH == Path).
 // On Linux/macOS, names are case-sensitive (PATH != Path).
-// Go's runtime.GOOS is used to pick the correct comparison strategy.
 func mergeEnv(extra []string) []string {
 	if len(extra) == 0 {
 		return os.Environ()
 	}
-	// Build a map keyed by the comparison form (upper on Windows, as-is elsewhere).
-	envMap := make(map[string]string) // compareKey → "KEY=VALUE" string
-	keyOrder := make(map[string]string) // compareKey → original key (first seen)
-	normalize := envKeyNormalizer() // func(string) string
+	envMap := make(map[string]string)
+	keyOrder := make(map[string]string)
+	normalize := envKeyNormalizer()
 
 	for _, kv := range os.Environ() {
 		key := kv
@@ -325,9 +350,6 @@ func mergeEnv(extra []string) []string {
 	return out
 }
 
-// envKeyNormalizer returns a function that normalizes env var keys for
-// comparison. On Windows, keys are upper-cased (case-insensitive).
-// On Linux/macOS, keys are returned as-is (case-sensitive).
 func envKeyNormalizer() func(string) string {
 	if runtime.GOOS == "windows" {
 		return strings.ToUpper

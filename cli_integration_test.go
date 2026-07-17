@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -31,10 +33,15 @@ func TestCLIHelperProcess(t *testing.T) {
 }
 
 func runCLIForTest(t *testing.T, args ...string) ([]byte, []byte, int) {
+	home := t.TempDir()
+	return runCLIForTestEnv(t, []string{"HOME=" + home, "USERPROFILE=" + home}, args...)
+}
+
+func runCLIForTestEnv(t *testing.T, extraEnv []string, args ...string) ([]byte, []byte, int) {
 	t.Helper()
 	cmdArgs := append([]string{"-test.run=^TestCLIHelperProcess$", "--"}, args...)
 	cmd := exec.Command(os.Args[0], cmdArgs...)
-	cmd.Env = append(os.Environ(), "GO_SHELL_HELPER_PROCESS=1")
+	cmd.Env = mergeEnvForOS(os.Environ(), append(extraEnv, "GO_SHELL_HELPER_PROCESS=1"), osGoos)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -48,6 +55,29 @@ func runCLIForTest(t *testing.T, args ...string) ([]byte, []byte, int) {
 		exitCode = exitErr.ExitCode()
 	}
 	return []byte(stdout.String()), []byte(stderr.String()), exitCode
+}
+
+func readAuditResults(t *testing.T, home string) []result {
+	t.Helper()
+	f, err := os.Open(filepath.Join(home, ".go_shell", "log.jsonl"))
+	if err != nil {
+		t.Fatalf("open audit log: %v", err)
+	}
+	defer f.Close()
+
+	var results []result
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var got result
+		if err := json.Unmarshal(scanner.Bytes(), &got); err != nil {
+			t.Fatalf("invalid JSONL entry %q: %v", scanner.Text(), err)
+		}
+		results = append(results, got)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan audit log: %v", err)
+	}
+	return results
 }
 
 func TestCLIJSONErrorsAreStructured(t *testing.T) {
@@ -76,6 +106,48 @@ func TestCLIJSONErrorsAreStructured(t *testing.T) {
 			}
 			if got.OK || got.ExitCode != 2 || !strings.Contains(got.Stderr, tc.want) {
 				t.Fatalf("result = %+v, want exit 2 containing %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCLIFunctionAndDryRunAreAudited(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       func(string) []string
+		wantPrefix string
+	}{
+		{
+			name: "write_file function",
+			args: func(work string) []string {
+				return []string{"--json", "--cwd", work, "-write_file", "out.txt", "content"}
+			},
+			wantPrefix: "write_file(",
+		},
+		{
+			name: "destructive dry run",
+			args: func(string) []string {
+				return []string{"--json", "-native", "-rm", "target"}
+			},
+			wantPrefix: "rm target",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			work := t.TempDir()
+			env := []string{"HOME=" + home, "USERPROFILE=" + home}
+			_, stderr, exitCode := runCLIForTestEnv(t, env, tc.args(work)...)
+			if exitCode != 0 {
+				t.Fatalf("exit code = %d, want 0; stderr=%q", exitCode, stderr)
+			}
+			entries := readAuditResults(t, home)
+			if len(entries) != 1 {
+				t.Fatalf("audit entries = %d, want 1", len(entries))
+			}
+			if !strings.HasPrefix(entries[0].ResolvedCommand, tc.wantPrefix) {
+				t.Fatalf("resolved command = %q, want prefix %q", entries[0].ResolvedCommand, tc.wantPrefix)
 			}
 		})
 	}

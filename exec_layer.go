@@ -200,7 +200,6 @@ func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
 	if backend == "powershell-5.1" {
 		res.Warning = "PowerShell 7 (pwsh) was not found; using Windows PowerShell 5.1 — output encoding may differ."
 	}
-	writeLog(res)
 	finalize(res, meta)
 }
 
@@ -315,11 +314,11 @@ func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaCon
 		}
 	}
 
-	writeLog(res)
 	return res
 }
 
 func finalize(res *result, meta *metaConfig) {
+	writeLog(res)
 	if meta.json {
 		out, _ := json.MarshalIndent(res, "", "  ")
 		fmt.Println(string(out))
@@ -453,6 +452,25 @@ func writeLog(res *result) {
 // writeLogImpl performs the actual log append. Returns an error on failure
 // so the caller can decide whether to surface it.
 func writeLogImpl(res *result) error {
+	line, err := marshalLogLine(res)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(logPath()), 0755); err != nil {
+		return err
+	}
+	// 0600: log contains resolved command strings (may include paths/args).
+	// Restrict to owner read/write to limit exposure.
+	f, err := os.OpenFile(logPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(line)
+	return err
+}
+
+func marshalLogLine(res *result) ([]byte, error) {
 	entry := map[string]any{
 		"ts":               time.Now().Format(time.RFC3339),
 		"ok":               res.OK,
@@ -464,22 +482,9 @@ func writeLogImpl(res *result) error {
 		"stdout_len":       len(res.Stdout),
 		"stderr_len":       len(res.Stderr),
 	}
-	line, _ := json.Marshal(entry)
-	if err := os.MkdirAll(filepath.Dir(logPath()), 0755); err != nil {
-		return err
-	}
-	// 0600: log contains resolved command strings (may include paths/args).
-	// Restrict to owner read/write to limit exposure.
-	f, err := os.OpenFile(logPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	line, err := json.Marshal(entry)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer f.Close()
-	if _, err := f.Write(line); err != nil {
-		return err
-	}
-	if _, err := f.Write([]byte("\n")); err != nil {
-		return err
-	}
-	return nil
+	return append(line, '\n'), nil
 }

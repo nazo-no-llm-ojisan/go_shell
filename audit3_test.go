@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -451,6 +452,31 @@ func TestWriteLogImpl_AppendsLines(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 2 {
 		t.Errorf("expected 2 log lines, got %d", len(lines))
+	}
+}
+
+func TestMarshalLogLineReturnsOneCompleteJSONLRecord(t *testing.T) {
+	res := &result{
+		OK:              true,
+		ExitCode:        0,
+		Backend:         "test",
+		OSMode:          "test",
+		ResolvedCommand: "echo hello",
+		Stdout:          "hello\n",
+	}
+	line, err := marshalLogLine(res)
+	if err != nil {
+		t.Fatalf("marshalLogLine: %v", err)
+	}
+	if !strings.HasSuffix(string(line), "\n") || strings.Count(string(line), "\n") != 1 {
+		t.Fatalf("line must contain exactly one trailing newline: %q", line)
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(line[:len(line)-1], &entry); err != nil {
+		t.Fatalf("record is not valid JSON: %v", err)
+	}
+	if entry["resolved_command"] != "echo hello" || entry["stdout_len"] != float64(6) {
+		t.Fatalf("unexpected entry: %#v", entry)
 	}
 }
 

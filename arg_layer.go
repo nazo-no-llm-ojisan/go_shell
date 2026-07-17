@@ -210,12 +210,30 @@ func translateMkdir(osName string, rawArgs []string) []resolvedArg {
 
 func translateTouch(osName string, rawArgs []string) []resolvedArg {
 	// touch on Windows is handled at exec layer (composite PowerShell).
-	// Args here are just paths — preserve original, mark as user values.
+	// PowerShell's composite implementation receives paths directly, so consume
+	// the first end-of-options marker instead of treating it as a filename.
+	if osName == "win" {
+		out := make([]resolvedArg, 0, len(rawArgs))
+		endOfOptions := false
+		for _, arg := range rawArgs {
+			if !endOfOptions && arg == "--" {
+				endOfOptions = true
+				continue
+			}
+			out = append(out, userVal(arg))
+		}
+		return out
+	}
+	// POSIX touch needs the separator to protect dash-prefixed paths.
 	return passthroughResolved(rawArgs)
 }
 
 func translateEcho(osName string, rawArgs []string) []resolvedArg {
-	// echo args are all user values — preserve original, will be quoted.
+	if osName == "win" {
+		// Write-Output emits one record per argument. Join first to preserve
+		// the single-line behavior of the abstract echo command.
+		return []resolvedArg{userVal(strings.Join(rawArgs, " "))}
+	}
 	return passthroughResolved(rawArgs)
 }
 

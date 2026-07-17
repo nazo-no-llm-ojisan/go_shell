@@ -72,6 +72,11 @@ func userVal(s string) resolvedArg {
 // stripOneDash removes a single leading dash. Used only inside translators
 // to normalize short flags for comparison — the ORIGINAL string is preserved
 // for any arg that doesn't match a known flag.
+//
+// Note: this is intentionally NOT used to match flag variants. A bare "p"
+// and a "-p" are different values to the user, even though they collapse to
+// the same string after this function. Use rawArgMatches for case-sensitive
+// exact-string matching of known flag forms.
 func stripOneDash(s string) string {
 	return strings.TrimPrefix(s, "-")
 }
@@ -80,18 +85,26 @@ func translateLS(osName string, rawArgs []string) []resolvedArg {
 	var out []resolvedArg
 	long := false
 	all := false
+	endOfOptions := false
+
 	for _, a := range rawArgs {
-		norm := stripOneDash(a)
-		switch norm {
-		case "l":
+		if endOfOptions {
+			out = append(out, userVal(a))
+			continue
+		}
+		switch a {
+		case "--":
+			endOfOptions = true
+			out = append(out, rawFlag("--"))
+		case "-l":
 			long = true
-		case "a":
+		case "-a":
 			all = true
-		case "al", "la":
-			all = true
+		case "-la", "-al":
 			long = true
+			all = true
 		default:
-			// unknown arg — preserve ORIGINAL value, mark as user value
+			// unknown arg (including bare "l", "a", "al") → preserve as user value
 			out = append(out, userVal(a))
 		}
 	}
@@ -119,18 +132,28 @@ func translateRM(osName string, rawArgs []string) []resolvedArg {
 	var out []resolvedArg
 	recursive := false
 	force := false
+	endOfOptions := false
+
 	for _, a := range rawArgs {
-		norm := stripOneDash(a)
-		switch norm {
-		case "r", "R":
+		if endOfOptions {
+			out = append(out, userVal(a))
+			continue
+		}
+		switch a {
+		case "--":
+			endOfOptions = true
+			out = append(out, rawFlag("--"))
+		case "-r", "-R":
 			recursive = true
-		case "rf":
-			recursive = true
+		case "-f":
 			force = true
-		case "f":
+		case "-rf", "-fr", "-Rf", "-fR":
+			recursive = true
 			force = true
 		default:
-			// unknown arg — preserve ORIGINAL value (file path may start with -)
+			// unknown arg (including bare "f", "r", "rf") → preserve as user value.
+			// Critical: a file named "f" or "-f" must reach rm as a path, not
+			// be silently absorbed as a flag.
 			out = append(out, userVal(a))
 		}
 	}
@@ -159,18 +182,28 @@ func translateRM(osName string, rawArgs []string) []resolvedArg {
 
 func translateMkdir(osName string, rawArgs []string) []resolvedArg {
 	var out []resolvedArg
+	endOfOptions := false
+
 	for _, a := range rawArgs {
-		norm := stripOneDash(a)
-		if norm == "p" {
+		if endOfOptions {
+			out = append(out, userVal(a))
+			continue
+		}
+		switch a {
+		case "--":
+			endOfOptions = true
+			out = append(out, rawFlag("--"))
+		case "-p":
 			if osName == "win" {
 				out = append([]resolvedArg{rawFlag("-Force")}, out...)
 			} else {
 				out = append([]resolvedArg{rawFlag("-p")}, out...)
 			}
-			continue
+		default:
+			// unknown arg (including bare "p") → preserve as user value.
+			// A directory literally named "p" or "-p" must reach mkdir as a path.
+			out = append(out, userVal(a))
 		}
-		// unknown arg — preserve original
-		out = append(out, userVal(a))
 	}
 	return out
 }

@@ -19,9 +19,17 @@ type metaConfig struct {
 
 func main() {
 	rawArgs := os.Args[1:]
-	meta, rest := parseMeta(rawArgs)
+	meta, rest, err := parseMetaChecked(rawArgs)
+	if err != nil {
+		fail(meta, 2, err.Error())
+		return
+	}
 
 	if len(rest) == 0 {
+		if meta.json {
+			fail(meta, 2, "no command given")
+			return
+		}
 		printUsage()
 		os.Exit(2)
 	}
@@ -42,8 +50,7 @@ func main() {
 		runFunctionMode(stripped, rest[1:], meta)
 	default:
 		// not OS, not function → reject as likely hallucinated call
-		fmt.Fprintf(os.Stderr, "go_shell: unknown OS or function: -%s\n", stripped)
-		os.Exit(2)
+		fail(meta, 2, fmt.Sprintf("unknown OS or function: -%s", stripped))
 	}
 }
 
@@ -51,6 +58,14 @@ func main() {
 // Invalid meta values (missing value, unparseable duration, malformed env)
 // are fatal — fail-closed is appropriate for an agent execution runtime.
 func parseMeta(args []string) (*metaConfig, []string) {
+	meta, rest, err := parseMetaChecked(args)
+	if err != nil {
+		fatalMeta(err.Error())
+	}
+	return meta, rest
+}
+
+func parseMetaChecked(args []string) (*metaConfig, []string, error) {
 	meta := &metaConfig{timeout: 60 * time.Second}
 	i := 0
 	for i < len(args) {
@@ -70,38 +85,48 @@ func parseMeta(args []string) (*metaConfig, []string) {
 			i++
 		case "--cwd":
 			if i+1 >= len(args) {
-				fatalMeta("--cwd requires a directory path")
+				return meta, nil, fmt.Errorf("--cwd requires a directory path")
 			}
 			meta.cwd = args[i+1]
 			i += 2
 		case "--timeout":
 			if i+1 >= len(args) {
-				fatalMeta("--timeout requires a duration (e.g. 30s, 2m)")
+				return meta, nil, fmt.Errorf("--timeout requires a duration (e.g. 30s, 2m)")
 			}
 			d, err := time.ParseDuration(args[i+1])
 			if err != nil {
-				fatalMeta("--timeout: invalid duration " + args[i+1])
+				return meta, nil, fmt.Errorf("--timeout: invalid duration %s", args[i+1])
 			}
 			if d <= 0 {
-				fatalMeta("--timeout: must be positive")
+				return meta, nil, fmt.Errorf("--timeout: must be positive")
 			}
 			meta.timeout = d
 			i += 2
 		case "--env":
 			if i+1 >= len(args) {
-				fatalMeta("--env requires KEY=VALUE")
+				return meta, nil, fmt.Errorf("--env requires KEY=VALUE")
 			}
 			if !strings.Contains(args[i+1], "=") {
-				fatalMeta("--env: expected KEY=VALUE, got " + args[i+1])
+				return meta, nil, fmt.Errorf("--env: expected KEY=VALUE, got %s", args[i+1])
 			}
 			meta.env = append(meta.env, args[i+1])
 			i += 2
 		default:
 			// Unknown -- flag → fatal (fail-closed)
-			fatalMeta("unknown meta flag: " + a)
+			return meta, nil, fmt.Errorf("unknown meta flag: %s", a)
 		}
 	}
-	return meta, args[i:]
+	return meta, args[i:], nil
+}
+
+func fail(meta *metaConfig, exitCode int, message string) {
+	finalize(&result{
+		OK:       false,
+		ExitCode: exitCode,
+		Stderr:   "go_shell: " + message + "\n",
+		Backend:  "go-internal",
+		OSMode:   "meta",
+	}, meta)
 }
 
 func fatalMeta(msg string) {

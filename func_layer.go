@@ -46,13 +46,13 @@ func funcList() []string {
 func runFunctionMode(name string, args []string, meta *metaConfig) {
 	fn, ok := functionRegistry[name]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "go_shell: unknown function: -%s\n", name)
-		os.Exit(2)
+		fail(meta, 2, fmt.Sprintf("unknown function: -%s", name))
+		return
 	}
 	// Validate --cwd before any side effect (same as OS mode)
 	if err := validateCwd(meta); err != nil {
-		fmt.Fprintln(os.Stderr, "go_shell:", err)
-		os.Exit(2)
+		fail(meta, 2, err.Error())
+		return
 	}
 	res := fn(args, meta)
 	if res == nil {

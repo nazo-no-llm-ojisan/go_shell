@@ -46,14 +46,14 @@ func newResult(osName, backend, resolved string) *result {
 // runOSMode drives the 4-layer pipeline.
 func runOSMode(osName string, args []string, meta *metaConfig) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "go_shell: no command given")
-		os.Exit(2)
+		fail(meta, 2, "no command given")
+		return
 	}
 
 	// Validate --cwd before any side effect
 	if err := validateCwd(meta); err != nil {
-		fmt.Fprintln(os.Stderr, "go_shell:", err)
-		os.Exit(2)
+		fail(meta, 2, err.Error())
+		return
 	}
 
 	concrete := resolveAutoOSIfAuto(osName)

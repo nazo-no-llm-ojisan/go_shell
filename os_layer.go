@@ -37,7 +37,10 @@ func resolveAutoOS() string {
 	case "darwin":
 		return "macos"
 	case "linux":
-		// Could be WSL; we treat bare linux as linux unless detected otherwise.
+		// Detect WSL and route to -wsl backend so wsl.exe sh -c is used.
+		if detectWSL() {
+			return "wsl"
+		}
 		return "linux"
 	default:
 		return "linux"

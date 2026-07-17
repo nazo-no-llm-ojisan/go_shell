@@ -262,9 +262,15 @@ func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaCon
 			res.Stderr = err.Error()
 			return res
 		}
-		// Quote each arg with shQuote. Raw flags are also quoted for POSIX
-		// shells since "-Force" is just a string to sh.
-		line := cmd
+		// mapped=true: cmd is a translator-generated syntax fragment (e.g. "ls"),
+		// emitted raw. mapped=false (passthrough): cmd is a user-supplied command
+		// name, quoted to match pwsh backend behavior (& 'git' 'status').
+		var line string
+		if mapped {
+			line = cmd
+		} else {
+			line = shQuote(cmd)
+		}
 		for _, a := range args {
 			line += " " + shQuote(a.Value)
 		}

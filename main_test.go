@@ -318,3 +318,77 @@ func resolvedValues(args []resolvedArg) []string {
 	}
 	return out
 }
+
+// ============================================================================
+// detectWSL() → resolveAutoOS() wiring
+//
+// resolveAutoOS() depends on runtime.GOOS, so these tests only make sense
+// on a Linux host. On Windows or macOS we skip.
+// ============================================================================
+
+func TestResolveAutoOS_DetectsWSL(t *testing.T) {
+	if runtimeGOOSForTest() != "linux" {
+		t.Skip("resolveAutoOS WSL detection is Linux-only (runtime.GOOS != linux)")
+	}
+	// Save the existing readFileImpl seam
+	saved := readFileImpl
+	t.Cleanup(func() { readFileImpl = saved })
+
+	// WSL: /proc/version contains "microsoft" (case-insensitive)
+	readFileImpl = func(path string) ([]byte, error) {
+		return []byte("Linux version 5.15.0-microsoft-standard-WSL2 (oe-user@oe-host)"), nil
+	}
+	if got := resolveAutoOS(); got != "wsl" {
+		t.Errorf("resolveAutoOS() with WSL /proc/version = %q, want %q", got, "wsl")
+	}
+}
+
+func TestResolveAutoOS_PlainLinuxNoMicrosoft(t *testing.T) {
+	if runtimeGOOSForTest() != "linux" {
+		t.Skip("resolveAutoOS plain-Linux detection is Linux-only")
+	}
+	saved := readFileImpl
+	t.Cleanup(func() { readFileImpl = saved })
+
+	// Plain Linux: no "microsoft" token in /proc/version
+	readFileImpl = func(path string) ([]byte, error) {
+		return []byte("Linux version 6.5.0-15-generic (buildd@lcy02-amd64-019)"), nil
+	}
+	if got := resolveAutoOS(); got != "linux" {
+		t.Errorf("resolveAutoOS() with plain Linux /proc/version = %q, want %q", got, "linux")
+	}
+}
+
+func TestResolveAutoOS_NonLinuxBypassesWSLDetect(t *testing.T) {
+	// On non-Linux hosts, resolveAutoOS must not consult detectWSL.
+	// This test runs on any host; it verifies the windows/darwin branches
+	// still return their respective OS modes regardless of /proc/version.
+	if runtimeGOOSForTest() == "linux" {
+		t.Skip("this test verifies the non-Linux branch on non-Linux hosts")
+	}
+	// Even if /proc/version were populated, WSL detection is gated by
+	// the linux case in resolveAutoOS, so the result must still match
+	// the host OS.
+	saved := readFileImpl
+	t.Cleanup(func() { readFileImpl = saved })
+	readFileImpl = func(path string) ([]byte, error) {
+		return []byte("Linux version 5.15.0-microsoft-standard-WSL2"), nil
+	}
+	got := resolveAutoOS()
+	switch runtimeGOOSForTest() {
+	case "windows":
+		if got != "win" {
+			t.Errorf("Windows host: resolveAutoOS() = %q, want %q", got, "win")
+		}
+	case "darwin":
+		if got != "macos" {
+			t.Errorf("macOS host: resolveAutoOS() = %q, want %q", got, "macos")
+		}
+	}
+}
+
+// runtimeGOOSForTest reads the same seam as os_layer.go's detectWSL/resolveAutoOS
+// (osGoos) so the test skip conditions are consistent with the production code.
+func runtimeGOOSForTest() string {
+	return osGoos
+}

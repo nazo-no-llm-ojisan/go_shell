@@ -170,3 +170,26 @@ func TestCLIWindowsTouchWithoutPathIsStructuredUsageError(t *testing.T) {
 		t.Fatalf("result = %+v, want touch usage error", got)
 	}
 }
+
+func TestCLIJSONAuditLogFailureUsesWarningField(t *testing.T) {
+	dir := t.TempDir()
+	badHome := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(badHome, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HOME=" + badHome, "USERPROFILE=" + badHome}
+	stdout, stderr, exitCode := runCLIForTestEnv(t, env, "--json", "-open_url", "https://example.invalid")
+	if exitCode != stubExitCode {
+		t.Fatalf("exit code = %d, want %d; stdout=%q stderr=%q", exitCode, stubExitCode, stdout, stderr)
+	}
+	if len(stderr) != 0 {
+		t.Fatalf("stderr = %q, want empty in JSON mode", stderr)
+	}
+	var got result
+	if err := json.Unmarshal(stdout, &got); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if !strings.Contains(got.Warning, "audit log write failed") {
+		t.Fatalf("warning = %q, want audit log failure", got.Warning)
+	}
+}

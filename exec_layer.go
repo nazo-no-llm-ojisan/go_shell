@@ -323,7 +323,18 @@ func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaCon
 }
 
 func finalize(res *result, meta *metaConfig) {
-	writeLog(res)
+	if logErr := writeLogImpl(res); logErr != nil {
+		message := "audit log write failed: " + logErr.Error()
+		if meta.json {
+			if res.Warning == "" {
+				res.Warning = message
+			} else {
+				res.Warning += "; " + message
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "go_shell: warning: %s\n", message)
+		}
+	}
 	if meta.json {
 		out, _ := json.MarshalIndent(res, "", "  ")
 		fmt.Println(string(out))
@@ -447,17 +458,6 @@ func logPath() string {
 		home = "."
 	}
 	return filepath.Join(home, ".go_shell", "log.jsonl")
-}
-
-func writeLog(res *result) {
-	logErr := writeLogImpl(res)
-	// Log write failure is not fatal to the command itself, but in normal
-	// (non-JSON) mode we surface a warning on stderr so it's not silently
-	// swallowed. The command's own OK/exit_code is never changed by log errors.
-	// (A future --require-audit-log could promote this to fatal.)
-	if logErr != nil {
-		fmt.Fprintf(os.Stderr, "go_shell: warning: audit log write failed: %v\n", logErr)
-	}
 }
 
 // writeLogImpl performs the actual log append. Returns an error on failure

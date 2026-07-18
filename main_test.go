@@ -131,8 +131,8 @@ func TestTranslateLS_Win(t *testing.T) {
 		{[]string{"-al"}, []string{"-Force"}}, // long+all → -Force only
 		{[]string{"-la"}, []string{"-Force"}},
 		{[]string{}, []string{}},
-		{[]string{"somepath"}, []string{"somepath"}},
-		{[]string{"-a", "somepath"}, []string{"-Force", "somepath"}},
+		{[]string{"somepath"}, []string{"-LiteralPath", "@('somepath')"}},
+		{[]string{"-a", "somepath"}, []string{"-Force", "-LiteralPath", "@('somepath')"}},
 	}
 	for _, c := range cases {
 		got := translateLS("win", c.args)
@@ -171,8 +171,8 @@ func TestTranslateRM_Win(t *testing.T) {
 		{[]string{"-r"}, []string{"-Recurse"}},
 		{[]string{"-rf"}, []string{"-Force", "-Recurse"}},
 		{[]string{"-f"}, []string{"-Force"}},
-		{[]string{"target"}, []string{"target"}},
-		{[]string{"-r", "target"}, []string{"-Recurse", "target"}},
+		{[]string{"target"}, []string{"-LiteralPath", "@('target')"}},
+		{[]string{"-r", "target"}, []string{"-Recurse", "-LiteralPath", "@('target')"}},
 	}
 	for _, c := range cases {
 		got := translateRM("win", c.args)
@@ -203,7 +203,7 @@ func TestTranslateRM_Linux(t *testing.T) {
 
 func TestTranslateMkdir_Win(t *testing.T) {
 	got := translateMkdir("win", []string{"-p", "newdir"})
-	want := []string{"-Force", "newdir"}
+	want := []string{"-Force", "-Path", "@('newdir')"}
 	if !sliceEq(resolvedValues(got), want) {
 		t.Errorf("translateMkdir(win, -p newdir) = %v, want %v", got, want)
 	}

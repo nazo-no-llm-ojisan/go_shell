@@ -134,11 +134,9 @@ func TestTranslateRM_WinFallsBackToExistingFlagForm(t *testing.T) {
 	// On Windows, -rf maps to BOTH -Recurse and -Force. The user value
 	// "f" must still not be absorbed as a flag.
 	got := translateRM("win", []string{"f"})
-	if len(got) != 1 {
-		t.Fatalf("translateRM(win, [f]) len=%d, want 1: %+v", len(got), got)
-	}
-	if got[0].Value != "f" || got[0].Raw {
-		t.Errorf("bare 'f' on win must be user value, got %+v", got[0])
+	line := buildPwshCommandLine("Remove-Item", got, true)
+	if line != "Remove-Item -LiteralPath @('f')" {
+		t.Fatalf("bare 'f' on win was not preserved as a literal path: %q", line)
 	}
 }
 

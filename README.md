@@ -150,6 +150,7 @@ Git Bash is **never** invoked.
 `go_shell` executes local commands and may modify or delete files. Treat any agent that can invoke `go_shell` as having local execution capability.
 
 - `rm` and `rmdir` require `--yes`. This is a **UX guard against accidental mapped-command misuse, not a security boundary or sandbox.** Passthrough commands (`Remove-Item`, `cmd /c del`, `sh -c "rm -rf ..."`) are not intercepted.
+- Windows mapped commands treat user-supplied path operands literally. Wildcard-like values such as `[abc].txt` are passed through `-LiteralPath` where the PowerShell cmdlet supports it; passthrough commands retain their native PowerShell semantics.
 - Do not expose `go_shell` directly to untrusted remote input.
 - Do not pass secrets as command-line arguments — they are visible in process listings and in `~/.go_shell/log.jsonl`.
 - Prefer environment variables (`--env`) or explicit secret-management integration.

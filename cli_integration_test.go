@@ -153,3 +153,20 @@ func TestCLIFunctionAndDryRunAreAudited(t *testing.T) {
 		})
 	}
 }
+
+func TestCLIWindowsTouchWithoutPathIsStructuredUsageError(t *testing.T) {
+	stdout, stderr, exitCode := runCLIForTest(t, "--json", "-win", "-touch")
+	if exitCode != 2 {
+		t.Fatalf("exit code = %d, want 2; stdout=%q stderr=%q", exitCode, stdout, stderr)
+	}
+	if len(stderr) != 0 {
+		t.Fatalf("stderr = %q, want empty in JSON mode", stderr)
+	}
+	var got result
+	if err := json.Unmarshal(stdout, &got); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if got.OK || !strings.Contains(got.Stderr, "touch: requires at least one path") {
+		t.Fatalf("result = %+v, want touch usage error", got)
+	}
+}

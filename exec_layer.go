@@ -137,6 +137,19 @@ func isDestructive(logicalCmd string) bool {
 
 // runTouchWindows implements Unix-compatible touch on Windows via composite PowerShell.
 func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
+	script, displayPaths, buildErr := buildTouchWindowsScript(args)
+	if buildErr != nil {
+		finalize(&result{
+			OK:              false,
+			ExitCode:        2,
+			Backend:         "pwsh",
+			OSMode:          osName,
+			ResolvedCommand: "touch(composite)",
+			Stderr:          buildErr.Error() + "\n",
+		}, meta)
+		return
+	}
+
 	shellPath, shellArgs, err := shellPathFor("pwsh", meta.allowWindowsPwsh)
 	if err != nil {
 		res := &result{OK: false, ExitCode: 127, Stderr: err.Error(), OSMode: osName, Backend: "pwsh"}
@@ -144,17 +157,6 @@ func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
 		return
 	}
 
-	// Build: foreach ($p in 'path1','path2') { if (Test-Path -LiteralPath $p) { ... } else { ... } }
-	// All user paths are pwshQuote'd to prevent injection.
-	var paths []string
-	var displayPaths []string
-	for _, a := range args {
-		paths = append(paths, pwshQuote(a.Value))
-		displayPaths = append(displayPaths, a.Value)
-	}
-	script := fmt.Sprintf(
-		"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; foreach ($p in %s) { if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTime = Get-Date } else { New-Item -ItemType File -Path $p | Out-Null } }",
-		strings.Join(paths, ","))
 	fullArgs := append(append([]string{}, shellArgs...), script)
 
 	ctx, cancel := context.WithTimeout(context.Background(), meta.timeout)
@@ -205,6 +207,22 @@ func runTouchWindows(args []resolvedArg, meta *metaConfig, osName string) {
 		res.Warning = "PowerShell 7 (pwsh) was not found; using Windows PowerShell 5.1 — output encoding may differ."
 	}
 	finalize(res, meta)
+}
+
+func buildTouchWindowsScript(args []resolvedArg) (string, []string, error) {
+	if len(args) == 0 {
+		return "", nil, fmt.Errorf("touch: requires at least one path")
+	}
+	paths := make([]string, 0, len(args))
+	displayPaths := make([]string, 0, len(args))
+	for _, arg := range args {
+		paths = append(paths, pwshQuote(arg.Value))
+		displayPaths = append(displayPaths, arg.Value)
+	}
+	script := fmt.Sprintf(
+		"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; foreach ($p in %s) { if (Test-Path -LiteralPath $p) { (Get-Item -LiteralPath $p).LastWriteTime = Get-Date } else { $stream = [System.IO.File]::Open($p, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite); $stream.Dispose() } }",
+		strings.Join(paths, ","))
+	return script, displayPaths, nil
 }
 
 func execute(res *result, backend, cmd string, args []resolvedArg, meta *metaConfig, mapped bool) *result {
